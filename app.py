@@ -1,9 +1,8 @@
 import os
 import asyncio
 from telethon import TelegramClient, errors
-from telethon.tl.types import InputMessagesFilterVideo, Message
+from telethon.tl.types import Message
 from dotenv import load_dotenv
-from time import sleep
 import uuid
 
 load_dotenv()  # Load environment variables from .env.
@@ -39,8 +38,8 @@ async def download_media_with_retry(client: TelegramClient, message: Message, fo
                         os.rename(file_path, os.path.join(folder, str(uuid.uuid4())[0:5] + os.path.basename(file_path)))
                         break  # Exit loop if successful
                     except errors.FloodError as e:
-                        print(f"FloodWaitError: Must wait for 60 seconds.")
-                        await asyncio.sleep(60)  # Wait for the specified time
+                        print(f"FloodWaitError: Must wait for {e.seconds} seconds.")
+                        await asyncio.sleep(e.seconds)  # Wait for the specified time
                     except Exception as e:
                         print(f"Error occurred while downloading: {e}")
                         if file_path and os.path.exists(file_path):
@@ -48,28 +47,14 @@ async def download_media_with_retry(client: TelegramClient, message: Message, fo
                         break
 
 
-async def main():
-
-    # Replace these with your own values
-    api_id = os.environ.get("API_ID")
-    api_hash = os.environ.get("API_HASH")
-    phone_number = os.environ.get("PHONE_NUMBER")
-
-    message_links: list[str] = []
-    with open("links.txt", "r") as reader:
-        message_links = reader.read().split("\n")
-
-    for message_link in message_links:
-        print(f"download link :{message_link}")
+async def process_message_link(client: TelegramClient, message_link: str, semaphore: asyncio.Semaphore):
+    async with semaphore:
+        print(f"Downloading link: {message_link}")
         protected_group = message_link.split("/")[-2]
         if protected_group.isnumeric():
             protected_group = int(protected_group)
 
         id_filter = int(message_link.split("/")[-1])
-
-        # Create the client and connect
-        client = TelegramClient("session_name", api_id, api_hash)
-        await client.start(phone=phone_number)
 
         try:
             # Fetch the specific message by ID
@@ -86,9 +71,33 @@ async def main():
             await asyncio.sleep(e.seconds)  # Wait before retrying
         except Exception as e:
             print(f"An error occurred: {e}")
-        finally:
-            # Disconnect the client
-            await client.disconnect()
+
+
+async def main():
+    # Replace these with your own values
+    api_id = os.environ.get("API_ID")
+    api_hash = os.environ.get("API_HASH")
+    phone_number = os.environ.get("PHONE_NUMBER")
+
+    message_links: list[str] = []
+    with open("links.txt", "r") as reader:
+        message_links = [line.strip() for line in reader if line.strip()]
+
+    # Create the client once outside the loop
+    client = TelegramClient("session_name", api_id, api_hash)
+    await client.start(phone=phone_number)
+
+    # Create a semaphore to limit concurrency to 2
+    semaphore = asyncio.Semaphore(2)
+
+    tasks = []
+    for message_link in message_links:
+        task = asyncio.create_task(process_message_link(client, message_link, semaphore))
+        tasks.append(task)
+
+    await asyncio.gather(*tasks)
+
+    await client.disconnect()
 
 
 # Run the main function

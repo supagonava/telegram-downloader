@@ -165,5 +165,5 @@ cython_debug/
 *.jpg
 downloads/*
 *.session
-*.session-journal
+*.session*
 links.txt
